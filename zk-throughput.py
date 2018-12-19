@@ -19,6 +19,7 @@
 import datetime, time, os
 from optparse import OptionParser
 import multiprocessing as mp
+from threading import Thread
 
 import zkclient
 from zkclient import ZKClient, CountingWatcher, zookeeper
@@ -86,14 +87,14 @@ def child_path(i):
 
 def asynchronous_latency_test(zd):
     # create znode_count znodes (perm)
-
+    global SESSIONS_NUM
     callbacks = []
     for j in xrange(options.znode_count/SESSIONS_NUM):
         cb = zkclient.CreateCallback()
         cb.cv.acquire()
         zd.session.acreate(child_path(j), cb, zd.data)
         callbacks.append(cb)
-    print("Callback created")
+
     count = 0
     for j, cb in enumerate(callbacks):
         cb.waitForSuccess()
@@ -105,6 +106,9 @@ def asynchronous_latency_test(zd):
             break
     return count
 
+def foo(zd):
+    print(zd)
+    return 5
 
 def log_result(result):
     global total_writes
@@ -112,7 +116,8 @@ def log_result(result):
 
 def apply_async_with_callback(sessions, data):
     global total_writes
-    pool = mp.Pool()
+    from multiprocessing.pool import ThreadPool
+    pool = ThreadPool(processes=SESSIONS_NUM)
     startTime = time.time()
     print("Start time: ", str(startTime))
     for i, s in enumerate(sessions):
@@ -120,8 +125,8 @@ def apply_async_with_callback(sessions, data):
         pool.apply_async(asynchronous_latency_test, args=(zd,), callback=log_result)
     pool.close()
     pool.join()
+    print("Duration: ", str(time.time()-startTime))
     print("Total writes: ", total_writes)
-
 
 if __name__ == '__main__':
     data = options.znode_size * "x"
