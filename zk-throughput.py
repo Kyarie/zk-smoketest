@@ -1,25 +1,8 @@
 #!/usr/bin/env python
 
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import datetime, time, os
 from optparse import OptionParser
-import multiprocessing as mp
-from threading import Thread
+from multiprocessing.pool import ThreadPool
 
 import zkclient
 from zkclient import ZKClient, CountingWatcher, zookeeper
@@ -61,6 +44,8 @@ parser.add_option("-v", "--verbose",
 parser.add_option("-q", "--quiet",
                   action="store_true", dest="quiet", default=False,
                   help="quiet output, basically just success/failure")
+parser.add_option("", "--type", dest="type", default=False,
+                  help="quiet output, basically just success/failure")
 
 (options, args) = parser.parse_args()
 
@@ -85,7 +70,7 @@ class ZkData:
 def child_path(i):
     return "%s/session_%d" % (options.root_znode, i)
 
-def asynchronous_latency_test(zd):
+def create_asynchronous_latency_test(zd):
     # create znode_count znodes (perm)
     global SESSIONS_NUM
     callbacks = []
@@ -106,9 +91,44 @@ def asynchronous_latency_test(zd):
             break
     return count
 
-def foo(zd):
-    print(zd)
-    return 5
+def get_asynchronous_latency_test(zd):
+    # create znode_count znodes (perm)
+    global SESSIONS_NUM
+    callbacks = []
+    for j in xrange(options.znode_count):
+        cb = zkclient.GetCallback()
+        cb.cv.acquire()
+        zd.session.aget(child_path(j), cb)
+        callbacks.append(cb)
+
+    count = 0
+    for cb in callbacks:
+        cb.waitForSuccess()
+        if cb.value != data:
+            raise SmokeError("invalid data %s for operation %d on handle %d" %
+                             (cb.value, j, cb.handle))
+        count += 1
+        if time.time() - zd.startTime >= 10000:
+            break
+    return count
+
+def set_asynchronous_latency_test(zd):
+    # create znode_count znodes (perm)
+    global SESSIONS_NUM
+    callbacks = []
+    for j in xrange(options.znode_count):
+        cb = zkclient.SetCallback()
+        cb.cv.acquire()
+        zd.session.aset(child_path(j), cb, zd.data)
+        callbacks.append(cb)
+
+    count = 0
+    for cb in callbacks:
+        cb.waitForSuccess()
+        count += 1
+        if time.time() - zd.startTime >= 10000:
+            break
+    return count
 
 def log_result(result):
     global total_writes
@@ -116,13 +136,17 @@ def log_result(result):
 
 def apply_async_with_callback(sessions, data):
     global total_writes
-    from multiprocessing.pool import ThreadPool
     pool = ThreadPool(processes=SESSIONS_NUM)
     startTime = time.time()
     print("Start time: ", str(startTime))
     for i, s in enumerate(sessions):
         zd = ZkData(s, data, startTime)
-        pool.apply_async(asynchronous_latency_test, args=(zd,), callback=log_result)
+        if option.type == "create":
+            pool.apply_async(create_asynchronous_latency_test, args=(zd,), callback=log_result)
+        elif option.type == "set":
+            pool.apply_async(set_asynchronous_latency_test, args=(zd,), callback=log_result)
+        elif option.type == "get":
+            pool.apply_async(get_asynchronous_latency_test, args=(zd,), callback=log_result)
     pool.close()
     pool.join()
     print("Duration: ", str(time.time()-startTime))
@@ -163,20 +187,3 @@ if __name__ == '__main__':
         s.close()
 
     print("Latency test complete")
-
-'''
-class ZkOptions:
-
-    def __init__(self, root_znode):
-        self.servers = "localhost:2181"
-        self.cluster = None
-        self.configfile = None
-        self.timeout = 5000
-        self.root_znode = root_znode
-        self.znode_size = 25
-        self.watch_multiple = 1
-        self.force = False
-        self.synchronous = False
-        self.verbose = False
-        self.quiet = False
-'''

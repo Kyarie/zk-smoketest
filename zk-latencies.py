@@ -107,6 +107,7 @@ def synchronous_latency_test(s, data):
            for j in xrange(options.znode_count)),
           "get     %7d           znodes " % (options.znode_count))
 
+def temp2():
     # delete znode_count znodes
     timer((s.delete(child_path(j))
            for j in xrange(options.znode_count)),
@@ -190,7 +191,7 @@ def asynchronous_latency_test(s, data):
 
     timer2(func, "get     %7d           znodes " % (options.znode_count))
 
-
+def temp():
     # delete znode_count znodes (perm)
     def func():
         callbacks = []
