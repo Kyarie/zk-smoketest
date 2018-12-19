@@ -83,34 +83,42 @@ class ZkTest:
 
     def asynchronous_latency_test(self, s, data, startTime):
         # create znode_count znodes (perm)
-        def func():
-            callbacks = []
-            for j in xrange(options.znode_count/SESSIONS_NUM):
-                cb = zkclient.CreateCallback()
-                cb.cv.acquire()
-                s.acreate(child_path(j), cb, data)
-                callbacks.append(cb)
-
-            j = 0
-            for j, cb in enumerate(callbacks):
-                cb.waitForSuccess()
-                if cb.path != child_path(j):
-                    raise SmokeError("invalid path %s for operation %d on handle %d" %
-                                     (cb.path, j, cb.handle))
-                if time.time() - startTime >= 10:
-                    break
+        
+        callbacks = []
+        for j in xrange(options.znode_count/SESSIONS_NUM):
+            cb = zkclient.CreateCallback()
+            cb.cv.acquire()
+            s.acreate(self.child_path(j), cb, data)
+            callbacks.append(cb)
+        print("Callback created")
+        count = 0
+        for j, cb in enumerate(callbacks):
+            cb.waitForSuccess()
+            if cb.path != self.child_path(j):
+                raise SmokeError("invalid path %s for operation %d on handle %d" %
+                                (cb.path, j, cb.handle))
+            #print("Duration: ", time.time() - startTime)
+            count += 1
+            if time.time() - startTime >= 10000:
+                break
         #timer2(func, "created %7d permanent znodes " % (options.znode_count))
-        return j
+        return count
 
 
     def log_result(self, result):
+        print("done")
         self.total_writes += result
 
+    def foo(self, x):
+        return x
+
     def apply_async_with_callback(self, sessions, data):
+        #self.asynchronous_latency_test(sessions[0], data, time.time())
         pool = mp.Pool()
         startTime = time.time()
+        print("Start time: ", str(startTime))
         for i, s in enumerate(sessions):
-            pool.apply_async(self.asynchronous_latency_test, args=(s, data, startTime), callback=self.log_result)
+            pool.apply_async(self.foo, args=(i,), callback=self.log_result)
         pool.close()
         pool.join()
         print("Total writes: ", self.total_writes)
@@ -118,7 +126,7 @@ class ZkTest:
 
 if __name__ == '__main__':
     data = options.znode_size * "x"
-
+    servers = options.servers.split(",")
     # create all the sessions first to ensure that all servers are
     # at least available & quorum has been formed. otw this will
     # fail right away (before we start creating nodes)
@@ -144,7 +152,7 @@ if __name__ == '__main__':
 
     zkTest = ZkTest()
 
-    zkTest.apply_async_with_callback(sessions)
+    zkTest.apply_async_with_callback(sessions, data)
 
     sessions[0].delete(options.root_znode)
 
