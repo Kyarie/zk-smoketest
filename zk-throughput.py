@@ -74,35 +74,36 @@ class SmokeError(Exception):
         return repr(self.value)
 
 
-class ZkTest:
+class ZkData:
 
-    def __init__(self, data, startTime):
+    def __init__(self, session, data, startTime):
+        self.session = session
         self.data = data
         self.startTime = startTime
 
-    def child_path(self, i):
-        return "%s/session_%d" % (options.root_znode, i)
+def child_path(i):
+    return "%s/session_%d" % (options.root_znode, i)
 
-    def asynchronous_latency_test(self, s):
-        # create znode_count znodes (perm)
-        
-        callbacks = []
-        for j in xrange(options.znode_count/SESSIONS_NUM):
-            cb = zkclient.CreateCallback()
-            cb.cv.acquire()
-            s.acreate(self.child_path(j), cb, self.data)
-            callbacks.append(cb)
-        print("Callback created")
-        count = 0
-        for j, cb in enumerate(callbacks):
-            cb.waitForSuccess()
-            if cb.path != self.child_path(j):
-                raise SmokeError("invalid path %s for operation %d on handle %d" %
-                                (cb.path, j, cb.handle))
-            count += 1
-            if time.time() - self.startTime >= 10000:
-                break
-        return count
+def asynchronous_latency_test(zd):
+    # create znode_count znodes (perm)
+
+    callbacks = []
+    for j in xrange(options.znode_count/SESSIONS_NUM):
+        cb = zkclient.CreateCallback()
+        cb.cv.acquire()
+        zd.session.acreate(child_path(j), cb, zd.data)
+        callbacks.append(cb)
+    print("Callback created")
+    count = 0
+    for j, cb in enumerate(callbacks):
+        cb.waitForSuccess()
+        if cb.path != child_path(j):
+            raise SmokeError("invalid path %s for operation %d on handle %d" %
+                            (cb.path, j, cb.handle))
+        count += 1
+        if time.time() - zd.startTime >= 10000:
+            break
+    return count
 
 
 def log_result(result):
@@ -111,14 +112,12 @@ def log_result(result):
 
 def apply_async_with_callback(sessions, data):
     global total_writes
-    zkTest = []
     pool = mp.Pool()
     startTime = time.time()
     print("Start time: ", str(startTime))
     for i, s in enumerate(sessions):
-        zt = ZkTest(s, data)
-        pool.apply_async(zt.asynchronous_latency_test, args=(s,), callback=zt.log_result)
-        zkTest.append(zt)
+        zd = ZkData(s, data, startTime)
+        pool.apply_async(asynchronous_latency_test, args=(zd,), callback=log_result)
     pool.close()
     pool.join()
     print("Total writes: ", total_writes)
