@@ -24,6 +24,7 @@ import zkclient
 from zkclient import ZKClient, CountingWatcher, zookeeper
 
 SESSIONS_NUM = 3
+total_writes = 0
 
 usage = "usage: %prog [options]"
 parser = OptionParser(usage=usage)
@@ -75,20 +76,21 @@ class SmokeError(Exception):
 
 class ZkTest:
 
-    def __init__(self):
-        self.total_writes = 0
+    def __init__(self, data, startTime):
+        self.data = data
+        self.startTime = startTime
 
     def child_path(self, i):
         return "%s/session_%d" % (options.root_znode, i)
 
-    def asynchronous_latency_test(self, s, data, startTime):
+    def asynchronous_latency_test(self, s):
         # create znode_count znodes (perm)
         
         callbacks = []
         for j in xrange(options.znode_count/SESSIONS_NUM):
             cb = zkclient.CreateCallback()
             cb.cv.acquire()
-            s.acreate(self.child_path(j), cb, data)
+            s.acreate(self.child_path(j), cb, self.data)
             callbacks.append(cb)
         print("Callback created")
         count = 0
@@ -97,31 +99,29 @@ class ZkTest:
             if cb.path != self.child_path(j):
                 raise SmokeError("invalid path %s for operation %d on handle %d" %
                                 (cb.path, j, cb.handle))
-            #print("Duration: ", time.time() - startTime)
             count += 1
-            if time.time() - startTime >= 10000:
+            if time.time() - self.startTime >= 10000:
                 break
-        #timer2(func, "created %7d permanent znodes " % (options.znode_count))
         return count
 
 
-    def log_result(self, result):
-        print("done")
-        self.total_writes += result
+def log_result(result):
+    global total_writes
+    total_writes += result
 
-    def foo(self, x):
-        return x
-
-    def apply_async_with_callback(self, sessions, data):
-        #self.asynchronous_latency_test(sessions[0], data, time.time())
-        pool = mp.Pool()
-        startTime = time.time()
-        print("Start time: ", str(startTime))
-        for i, s in enumerate(sessions):
-            pool.apply_async(self.foo, args=(i,), callback=self.log_result)
-        pool.close()
-        pool.join()
-        print("Total writes: ", self.total_writes)
+def apply_async_with_callback(sessions, data):
+    global total_writes
+    zkTest = []
+    pool = mp.Pool()
+    startTime = time.time()
+    print("Start time: ", str(startTime))
+    for i, s in enumerate(sessions):
+        zt = ZkTest(s, data)
+        pool.apply_async(zt.asynchronous_latency_test, args=(s,), callback=zt.log_result)
+        zkTest.append(zt)
+    pool.close()
+    pool.join()
+    print("Total writes: ", total_writes)
 
 
 if __name__ == '__main__':
@@ -150,9 +150,7 @@ if __name__ == '__main__':
                            "smoketest root, delete after test done, created %s" %
                            (datetime.datetime.now().ctime()))
 
-    zkTest = ZkTest()
-
-    zkTest.apply_async_with_callback(sessions, data)
+    apply_async_with_callback(sessions, data)
 
     sessions[0].delete(options.root_znode)
 
