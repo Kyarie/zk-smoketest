@@ -7,7 +7,7 @@ from multiprocessing.pool import ThreadPool
 import zkclient
 from zkclient import ZKClient, CountingWatcher, zookeeper
 
-SESSIONS_NUM = 3
+SESSIONS_NUM = 4
 total_writes = 0
 
 usage = "usage: %prog [options]"
@@ -87,7 +87,7 @@ def create_asynchronous_latency_test(zd):
             raise SmokeError("invalid path %s for operation %d on handle %d" %
                             (cb.path, j, cb.handle))
         count += 1
-        if time.time() - zd.startTime >= 10000:
+        if time.time() - zd.startTime >= 10:
             break
     return count
 
@@ -95,7 +95,7 @@ def get_asynchronous_latency_test(zd):
     # create znode_count znodes (perm)
     global SESSIONS_NUM
     callbacks = []
-    for j in xrange(options.znode_count):
+    for j in xrange(options.znode_count/SESSIONS_NUM):
         cb = zkclient.GetCallback()
         cb.cv.acquire()
         zd.session.aget(child_path(j), cb)
@@ -108,7 +108,7 @@ def get_asynchronous_latency_test(zd):
             raise SmokeError("invalid data %s for operation %d on handle %d" %
                              (cb.value, j, cb.handle))
         count += 1
-        if time.time() - zd.startTime >= 10000:
+        if time.time() - zd.startTime >= 10:
             break
     return count
 
@@ -116,7 +116,7 @@ def set_asynchronous_latency_test(zd):
     # create znode_count znodes (perm)
     global SESSIONS_NUM
     callbacks = []
-    for j in xrange(options.znode_count):
+    for j in xrange(options.znode_count/SESSIONS_NUM):
         cb = zkclient.SetCallback()
         cb.cv.acquire()
         zd.session.aset(child_path(j), cb, zd.data)
@@ -126,7 +126,7 @@ def set_asynchronous_latency_test(zd):
     for cb in callbacks:
         cb.waitForSuccess()
         count += 1
-        if time.time() - zd.startTime >= 10000:
+        if time.time() - zd.startTime >= 10:
             break
     return count
 
@@ -141,11 +141,11 @@ def apply_async_with_callback(sessions, data):
     print("Start time: ", str(startTime))
     for i, s in enumerate(sessions):
         zd = ZkData(s, data, startTime)
-        if option.type == "create":
+        if options.type == "create":
             pool.apply_async(create_asynchronous_latency_test, args=(zd,), callback=log_result)
-        elif option.type == "set":
+        elif options.type == "set":
             pool.apply_async(set_asynchronous_latency_test, args=(zd,), callback=log_result)
-        elif option.type == "get":
+        elif options.type == "get":
             pool.apply_async(get_asynchronous_latency_test, args=(zd,), callback=log_result)
     pool.close()
     pool.join()
